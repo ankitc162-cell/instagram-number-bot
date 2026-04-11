@@ -41,7 +41,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y ffmpeg fonts-dejavu-core
+          sudo apt-get install -y ffmpeg fonts-dejavu-core imagemagick
 
       # ── 4. Python setup ──────────────────────────────────────────────────────
       - name: Set up Python 3.11
