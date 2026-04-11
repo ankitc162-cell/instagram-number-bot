@@ -309,7 +309,7 @@ def build_video(data: dict, audio_path: str,
 # ─────────────────────────────────────────────────────────────────────────────
 def upload_video_to_hosting(video_path: str) -> str:
     """Upload video as a GitHub Release asset (free, no extra account needed)."""
-    gh_token   = os.environ["GITHUB_TOKEN"]
+    gh_token   = os.environ["GH_TOKEN"]
     gh_repo    = os.environ["GITHUB_REPOSITORY"]  # e.g. username/instagram-number-bot
     tag        = f"reel-day-{os.environ.get('DAY_NUMBER', '1')}-{int(time.time())}"
     headers    = {
