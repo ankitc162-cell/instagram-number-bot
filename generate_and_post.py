@@ -28,10 +28,8 @@ from moviepy.editor import (
 from moviepy.video.fx.all import crop, resize
 
 # ── Config from environment ───────────────────────────────────────────────────
-INSTAGRAM_ACCESS_TOKEN = os.environ["INSTAGRAM_ACCESS_TOKEN"]
-INSTAGRAM_USER_ID      = os.environ["INSTAGRAM_USER_ID"]
-GEMINI_API_KEY         = os.environ["GEMINI_API_KEY"]
-PEXELS_API_KEY         = os.environ["PEXELS_API_KEY"]
+GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
+PEXELS_API_KEY = os.environ["PEXELS_API_KEY"]
 
 EDGE_TTS_VOICE = "en-US-GuyNeural"   # energetic male voice
 DAY_NUMBER     = int(os.environ.get("DAY_NUMBER", 1))
@@ -43,13 +41,28 @@ REEL_W, REEL_H = 1080, 1920
 # 1. Get follower count
 # ─────────────────────────────────────────────────────────────────────────────
 def get_follower_count() -> int:
-    url = (
-        f"https://graph.facebook.com/v19.0/{INSTAGRAM_USER_ID}"
-        f"?fields=followers_count&access_token={INSTAGRAM_ACCESS_TOKEN}"
-    )
-    resp = requests.get(url, timeout=15)
-    resp.raise_for_status()
-    count = resp.json().get("followers_count", 0)
+    from instagrapi import Client
+    ig_username = os.environ["INSTAGRAM_USERNAME"]
+    ig_password = os.environ["INSTAGRAM_PASSWORD"]
+    session_file = "ig_session.json"
+
+    cl = Client()
+    cl.delay_range = [1, 3]
+
+    if os.path.exists(session_file):
+        try:
+            cl.load_settings(session_file)
+            cl.login(ig_username, ig_password)
+        except Exception:
+            cl = Client()
+            cl.login(ig_username, ig_password)
+            cl.dump_settings(session_file)
+    else:
+        cl.login(ig_username, ig_password)
+        cl.dump_settings(session_file)
+
+    user = cl.user_info_by_username(ig_username)
+    count = user.follower_count
     print(f"[INFO] Follower count: {count}")
     return count
 
@@ -322,86 +335,43 @@ def build_video(data: dict, audio_path: str,
 # ─────────────────────────────────────────────────────────────────────────────
 # 6. Upload & post to Instagram
 # ─────────────────────────────────────────────────────────────────────────────
-def upload_video_to_hosting(video_path: str) -> str:
-    """Upload video as a GitHub Release asset (free, no extra account needed)."""
-    gh_token   = os.environ["GH_TOKEN"]
-    gh_repo    = os.environ["GITHUB_REPOSITORY"]  # e.g. username/instagram-number-bot
-    tag        = f"reel-day-{os.environ.get('DAY_NUMBER', '1')}-{int(time.time())}"
-    headers    = {
-        "Authorization": f"Bearer {gh_token}",
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28"
-    }
+def post_reel_instagrapi(video_path: str, caption: str):
+    """Post reel directly using instagrapi (Instagram private API)."""
+    from instagrapi import Client
+    from instagrapi.exceptions import LoginRequired
 
-    # Step 1 — create a release
-    release_resp = requests.post(
-        f"https://api.github.com/repos/{gh_repo}/releases",
-        headers=headers,
-        json={"tag_name": tag, "name": tag, "body": "Daily reel video", "draft": False, "prerelease": True},
-        timeout=30
-    )
-    release_resp.raise_for_status()
-    upload_url = release_resp.json()["upload_url"].replace("{?name,label}", "")
-    release_id = release_resp.json()["id"]
+    ig_username = os.environ["INSTAGRAM_USERNAME"]
+    ig_password = os.environ["INSTAGRAM_PASSWORD"]
+    session_file = "ig_session.json"
 
-    # Step 2 — upload video as asset
-    filename = Path(video_path).name
-    with open(video_path, "rb") as f:
-        asset_resp = requests.post(
-            f"{upload_url}?name={filename}",
-            headers={**headers, "Content-Type": "video/mp4"},
-            data=f,
-            timeout=300
-        )
-    asset_resp.raise_for_status()
-    url = asset_resp.json()["browser_download_url"]
-    print(f"[INFO] Video uploaded to GitHub Releases -> {url}")
-    return url
+    cl = Client()
+    cl.delay_range = [1, 3]  # human-like delays
 
-
-def post_reel(video_url: str, caption: str) -> str:
-    base = "https://graph.facebook.com/v19.0"
-
-    container_resp = requests.post(
-        f"{base}/{INSTAGRAM_USER_ID}/media",
-        data={
-            "media_type":   "REELS",
-            "video_url":    video_url,
-            "caption":      caption,
-            "access_token": INSTAGRAM_ACCESS_TOKEN,
-        },
-        timeout=30,
-    )
-    container_resp.raise_for_status()
-    container_id = container_resp.json()["id"]
-    print(f"[INFO] Media container created: {container_id}")
-
-    for attempt in range(30):
-        time.sleep(10)
-        status_resp = requests.get(
-            f"{base}/{container_id}",
-            params={"fields": "status_code,status", "access_token": INSTAGRAM_ACCESS_TOKEN},
-            timeout=15,
-        )
-        status_resp.raise_for_status()
-        status = status_resp.json().get("status_code", "")
-        print(f"[INFO] Container status ({attempt+1}/30): {status}")
-        if status == "FINISHED":
-            break
-        if status == "ERROR":
-            raise RuntimeError(f"Instagram processing failed: {status_resp.json()}")
+    # Try loading existing session first
+    if os.path.exists(session_file):
+        try:
+            cl.load_settings(session_file)
+            cl.login(ig_username, ig_password)
+            cl.get_timeline_feed()  # test session
+            print("[INFO] Logged in using saved session")
+        except Exception:
+            print("[INFO] Session expired, logging in fresh...")
+            cl = Client()
+            cl.delay_range = [1, 3]
+            cl.login(ig_username, ig_password)
+            cl.dump_settings(session_file)
     else:
-        raise TimeoutError("Instagram timed out after 5 minutes.")
+        cl.login(ig_username, ig_password)
+        cl.dump_settings(session_file)
+        print("[INFO] Logged in fresh, session saved")
 
-    publish_resp = requests.post(
-        f"{base}/{INSTAGRAM_USER_ID}/media_publish",
-        data={"creation_id": container_id, "access_token": INSTAGRAM_ACCESS_TOKEN},
-        timeout=30,
+    print("[INFO] Uploading reel...")
+    media = cl.clip_upload(
+        path=video_path,
+        caption=caption
     )
-    publish_resp.raise_for_status()
-    media_id = publish_resp.json()["id"]
-    print(f"[INFO] Reel published! Media ID: {media_id}")
-    return media_id
+    print(f"[INFO] Reel posted! Media ID: {media.pk}, URL: https://www.instagram.com/reel/{media.code}/")
+    return media
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -410,29 +380,36 @@ def post_reel(video_url: str, caption: str) -> str:
 def main():
     # Ensure imageio-ffmpeg binary is used
     import imageio_ffmpeg
-    import os
     os.environ["IMAGEIO_FFMPEG_EXE"] = imageio_ffmpeg.get_ffmpeg_exe()
 
-    print(f"\n{'='*60}")
+    print(f"
+{'='*60}")
     print(f"  Daily Reel Generator -- {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}")
-    print(f"{'='*60}\n")
+    print(f"{'='*60}
+")
 
     followers  = get_follower_count()
     data       = generate_script_and_keywords(DAY_NUMBER, followers)
     audio_path = generate_voiceover(data["script"])
     video_path = build_video(data, audio_path, DAY_NUMBER, followers)
-    video_url  = upload_video_to_hosting(video_path)
 
     caption = (
-        f"Day {DAY_NUMBER} of posting facts about the number {followers}\n\n"
-        f"Today we have {followers} followers and THIS number is fascinating!\n\n"
-        f"Follow us and be part of this journey to 1,000,000\n\n"
+        f"Day {DAY_NUMBER} of posting facts about the number {followers}
+
+"
+        f"Today we have {followers} followers and THIS number is fascinating!
+
+"
+        f"Follow us and be part of this journey to 1,000,000
+
+"
         f"#numberfacts #didyouknow #educational #facts #math "
         f"#instagramreels #viral #mindblown #science"
     )
 
-    post_reel(video_url, caption)
-    print("\nDone! Reel posted successfully.")
+    post_reel_instagrapi(video_path, caption)
+    print("
+Done! Reel posted successfully.")
 
 
 if __name__ == "__main__":
