@@ -176,17 +176,50 @@ def generate_voiceover(script: str, output_path: str = "voiceover.mp3") -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 # 5. Build the reel video
 # ─────────────────────────────────────────────────────────────────────────────
+def make_text_image(text, fontsize, color, stroke_color="black", stroke_width=3):
+    """Render text to a PIL image, return as numpy array."""
+    from PIL import Image, ImageDraw, ImageFont
+    import numpy as np
+
+    # Try to load a nice font, fall back to default
+    try:
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", fontsize)
+    except Exception:
+        font = ImageFont.load_default()
+
+    # Measure text size
+    dummy = Image.new("RGBA", (1, 1))
+    draw  = ImageDraw.Draw(dummy)
+    bbox  = draw.textbbox((0, 0), text, font=font)
+    w     = bbox[2] - bbox[0] + stroke_width * 2 + 20
+    h     = bbox[3] - bbox[1] + stroke_width * 2 + 20
+
+    img  = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+
+    # Draw stroke
+    for dx in range(-stroke_width, stroke_width + 1):
+        for dy in range(-stroke_width, stroke_width + 1):
+            draw.text((stroke_width + 10 + dx, stroke_width + 10 + dy),
+                      text, font=font, fill=stroke_color)
+    # Draw main text
+    draw.text((stroke_width + 10, stroke_width + 10), text, font=font, fill=color)
+
+    return np.array(img)
+
+
 def make_number_overlay(number: int, day: int, duration: float):
-    """Big number + day badge that sits on top of all clips."""
+    """Big number + day badge using PIL (no ImageMagick needed)."""
+    number_arr = make_text_image(str(number), 200, "white")
+    day_arr    = make_text_image(f"DAY {day}", 60, "#FFC800")
+
     number_clip = (
-        TextClip(str(number), fontsize=200, color="white",
-                 font="DejaVu-Sans-Bold", stroke_color="black", stroke_width=4)
+        ImageClip(number_arr)
         .set_duration(duration)
         .set_position(("center", 0.35), relative=True)
     )
     day_clip = (
-        TextClip(f"DAY {day}", fontsize=60, color="#FFC800",
-                 font="DejaVu-Sans-Bold", stroke_color="black", stroke_width=2)
+        ImageClip(day_arr)
         .set_duration(duration)
         .set_position(("center", 0.22), relative=True)
     )
@@ -337,6 +370,11 @@ def post_reel(video_url: str, caption: str) -> str:
 # 7. Orchestrate
 # ─────────────────────────────────────────────────────────────────────────────
 def main():
+    # Ensure imageio-ffmpeg binary is used
+    import imageio_ffmpeg
+    import os
+    os.environ["IMAGEIO_FFMPEG_EXE"] = imageio_ffmpeg.get_ffmpeg_exe()
+
     print(f"\n{'='*60}")
     print(f"  Daily Reel Generator -- {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}")
     print(f"{'='*60}\n")
