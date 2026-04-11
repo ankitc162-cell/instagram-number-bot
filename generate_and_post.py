@@ -297,8 +297,23 @@ def build_video(data: dict, audio_path: str,
     ).set_audio(audio).set_duration(duration)
 
     final.write_videofile(
-        output_path, fps=30, codec="libx264", audio_codec="aac",
-        temp_audiofile="temp_audio.m4a", remove_temp=True, logger=None
+        output_path,
+        fps=30,
+        codec="libx264",
+        audio_codec="aac",
+        temp_audiofile="temp_audio.m4a",
+        remove_temp=True,
+        logger=None,
+        ffmpeg_params=[
+            "-profile:v", "baseline",
+            "-level", "3.0",
+            "-pix_fmt", "yuv420p",
+            "-movflags", "+faststart",
+            "-b:v", "3500k",
+            "-b:a", "128k",
+            "-ar", "44100",
+            "-ac", "2"
+        ]
     )
     print(f"[INFO] Final video built → {output_path}")
     return output_path
