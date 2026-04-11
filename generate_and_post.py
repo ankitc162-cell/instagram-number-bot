@@ -2,24 +2,31 @@
 Daily Instagram Reel Generator & Poster
 - Fetches follower count from Instagram Graph API
 - Generates number facts using Google Gemini (free)
-- Creates voiceover using ElevenLabs (free tier)
-- Assembles video using MoviePy
+- Creates voiceover using Microsoft Edge TTS (free, no API key)
+- Fetches relevant video clips from Pexels (free API)
+- Assembles engaging reel: video clips + big number overlay + voiceover
 - Posts reel to Instagram
 """
 
 import os
 import time
+import asyncio
 import textwrap
 import requests
+import tempfile
+import random
+import json
+import edge_tts
 from google import genai
 from pathlib import Path
 from datetime import datetime
 
-# Optional heavy deps
 try:
     from moviepy.editor import (
-        ColorClip, TextClip, CompositeVideoClip, AudioFileClip
+        VideoFileClip, ColorClip, TextClip, CompositeVideoClip,
+        AudioFileClip, concatenate_videoclips, ImageClip
     )
+    from moviepy.video.fx.all import crop, resize
     MOVIEPY_AVAILABLE = True
 except ImportError:
     MOVIEPY_AVAILABLE = False
@@ -27,18 +34,19 @@ except ImportError:
 # ── Config from environment ───────────────────────────────────────────────────
 INSTAGRAM_ACCESS_TOKEN = os.environ["INSTAGRAM_ACCESS_TOKEN"]
 INSTAGRAM_USER_ID      = os.environ["INSTAGRAM_USER_ID"]
-ELEVENLABS_API_KEY     = os.environ["ELEVENLABS_API_KEY"]
 GEMINI_API_KEY         = os.environ["GEMINI_API_KEY"]
+PEXELS_API_KEY         = os.environ["PEXELS_API_KEY"]
 
-ELEVENLABS_VOICE_ID = os.environ.get("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")
-DAY_NUMBER = int(os.environ.get("DAY_NUMBER", 1))
+EDGE_TTS_VOICE = "en-US-GuyNeural"   # energetic male voice
+DAY_NUMBER     = int(os.environ.get("DAY_NUMBER", 1))
+
+REEL_W, REEL_H = 1080, 1920
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 1. Get follower count (via Facebook Graph API)
+# 1. Get follower count
 # ─────────────────────────────────────────────────────────────────────────────
 def get_follower_count() -> int:
-    # Use Facebook Graph API (not graph.instagram.com)
     url = (
         f"https://graph.facebook.com/v19.0/{INSTAGRAM_USER_ID}"
         f"?fields=followers_count&access_token={INSTAGRAM_ACCESS_TOKEN}"
@@ -51,110 +59,215 @@ def get_follower_count() -> int:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 2. Generate script with Google Gemini (FREE)
+# 2. Generate script + search keywords with Gemini
 # ─────────────────────────────────────────────────────────────────────────────
-def generate_script(day: int, followers: int) -> str:
+def generate_script_and_keywords(day: int, followers: int) -> dict:
     client = genai.Client(api_key=GEMINI_API_KEY)
 
     prompt = f"""You are a scriptwriter for a viral educational Instagram Reels page.
 
-Today is Day {day}. The page currently has {followers} followers.
+Today is Day {day}. The page has {followers} followers.
 
-Write a short, engaging voiceover script for a reel about the number {followers}.
+Write a voiceover script about the number {followers} AND provide Pexels video search keywords for each fact.
 
-Rules:
-- Start with exactly: "Day {day} of posting facts about the number {followers}. Today we have {followers} followers."
-- Include 3 to 4 fascinating, surprising facts about the number {followers}. Choose the most compelling count — pick facts that will genuinely wow a general audience.
-- Facts can be mathematical, historical, cultural, scientific, or from pop culture — whatever is most mind-blowing for THIS specific number.
-- Keep each fact to 1-2 short punchy sentences. No filler words.
-- End with exactly: "Follow us and be part of this journey — all the way to 1 million!"
-- Total script length: 60-90 seconds when spoken aloud (~150-220 words).
-- Tone: enthusiastic, clear, like a knowledgeable friend — NOT a stiff documentary.
-- Output ONLY the voiceover script. No stage directions, no titles, no extra commentary."""
+Return ONLY valid JSON in this exact format:
+{{
+  "script": "Full voiceover script here...",
+  "segments": [
+    {{"fact": "One sentence summary of fact 1", "keywords": "pexels search term for fact 1"}},
+    {{"fact": "One sentence summary of fact 2", "keywords": "pexels search term for fact 2"}},
+    {{"fact": "One sentence summary of fact 3", "keywords": "pexels search term for fact 3"}}
+  ]
+}}
+
+Script rules:
+- Start with: "Day {day} of posting facts about the number {followers}. Today we have {followers} followers."
+- Include 3 fascinating facts about the number {followers}
+- End with: "Follow us and be part of this journey — all the way to 1 million!"
+- 150-200 words total, punchy and enthusiastic
+
+Keywords rules:
+- Each keyword should be a simple 1-3 word Pexels search term related to the fact topic
+- Examples: "space galaxy", "ancient egypt", "mathematics", "ocean waves", "city lights"
+- Make them visually interesting and likely to return good footage"""
 
     response = client.models.generate_content(
         model="gemini-2.5-flash",
         contents=prompt
     )
-    script = response.text.strip()
-    print(f"[INFO] Script generated ({len(script.split())} words)")
-    return script
+
+    text = response.text.strip()
+    # Strip markdown code fences if present
+    if text.startswith("```"):
+        text = text.split("```")[1]
+        if text.startswith("json"):
+            text = text[4:]
+    text = text.strip()
+
+    data = json.loads(text)
+    print(f"[INFO] Script generated ({len(data['script'].split())} words)")
+    print(f"[INFO] Segments: {[s['keywords'] for s in data['segments']]}")
+    return data
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 3. Generate voiceover with ElevenLabs
+# 3. Fetch video clips from Pexels
 # ─────────────────────────────────────────────────────────────────────────────
-def generate_voiceover(script: str, output_path: str = "voiceover.mp3") -> str:
-    url = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}"
-    headers = {
-        "xi-api-key": ELEVENLABS_API_KEY,
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "text": script,
-        "model_id": "eleven_monolingual_v1",
-        "voice_settings": {
-            "stability": 0.5,
-            "similarity_boost": 0.75,
-            "style": 0.4,
-            "use_speaker_boost": True
-        }
-    }
-    resp = requests.post(url, headers=headers, json=payload, timeout=60)
+def fetch_pexels_video(query: str, output_path: str) -> str:
+    headers = {"Authorization": PEXELS_API_KEY}
+    params  = {"query": query, "per_page": 10, "orientation": "portrait", "size": "medium"}
+
+    resp = requests.get("https://api.pexels.com/videos/search",
+                        headers=headers, params=params, timeout=15)
     resp.raise_for_status()
+    videos = resp.json().get("videos", [])
+
+    if not videos:
+        # fallback to landscape if no portrait
+        params["orientation"] = "landscape"
+        resp = requests.get("https://api.pexels.com/videos/search",
+                            headers=headers, params=params, timeout=15)
+        videos = resp.json().get("videos", [])
+
+    if not videos:
+        print(f"[WARN] No videos found for '{query}', using color fallback")
+        return None
+
+    # Pick a random video from top results for variety
+    video = random.choice(videos[:5])
+
+    # Get the best quality video file (HD preferred)
+    video_files = sorted(video["video_files"],
+                         key=lambda x: x.get("width", 0), reverse=True)
+    # Pick highest res that's not 4K (too large)
+    chosen = next((v for v in video_files if v.get("width", 0) <= 1920), video_files[0])
+
+    video_url = chosen["link"]
+    print(f"[INFO] Downloading Pexels clip: {query} → {video_url[:60]}...")
+
+    video_resp = requests.get(video_url, timeout=60, stream=True)
+    video_resp.raise_for_status()
     with open(output_path, "wb") as f:
-        f.write(resp.content)
-    print(f"[INFO] Voiceover saved -> {output_path}")
+        for chunk in video_resp.iter_content(chunk_size=8192):
+            f.write(chunk)
+
+    print(f"[INFO] Clip saved → {output_path}")
     return output_path
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 4. Build the video (vertical 9:16 reel)
+# 4. Generate voiceover with Edge TTS
 # ─────────────────────────────────────────────────────────────────────────────
-REEL_W, REEL_H = 1080, 1920
-BG_COLOR   = (15, 15, 30)
-ACCENT     = (255, 200, 0)
-TEXT_WHITE = (255, 255, 255)
+async def _edge_tts_generate(script: str, output_path: str):
+    communicate = edge_tts.Communicate(script, EDGE_TTS_VOICE)
+    await communicate.save(output_path)
 
-def _text_clip(text, fontsize, color, duration, pos, max_width=900):
-    wrapped = "\n".join(textwrap.wrap(text, width=max(10, max_width // (fontsize // 2))))
-    return (
-        TextClip(wrapped, fontsize=fontsize, color=color,
-                 font="DejaVu-Sans-Bold", method="caption", size=(max_width, None))
+def generate_voiceover(script: str, output_path: str = "voiceover.mp3") -> str:
+    asyncio.run(_edge_tts_generate(script, output_path))
+    print(f"[INFO] Voiceover saved → {output_path}")
+    return output_path
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 5. Build the reel video
+# ─────────────────────────────────────────────────────────────────────────────
+def make_number_overlay(number: int, day: int, duration: float):
+    """Big number + day badge that sits on top of all clips."""
+    number_clip = (
+        TextClip(str(number), fontsize=200, color="white",
+                 font="DejaVu-Sans-Bold", stroke_color="black", stroke_width=4)
         .set_duration(duration)
-        .set_position(pos)
+        .set_position(("center", 0.35), relative=True)
     )
+    day_clip = (
+        TextClip(f"DAY {day}", fontsize=60, color="#FFC800",
+                 font="DejaVu-Sans-Bold", stroke_color="black", stroke_width=2)
+        .set_duration(duration)
+        .set_position(("center", 0.22), relative=True)
+    )
+    return [day_clip, number_clip]
 
-def build_video(script: str, audio_path: str,
+
+def crop_to_portrait(clip):
+    """Crop any clip to 9:16 portrait (1080x1920)."""
+    target_ratio = REEL_W / REEL_H
+    clip_ratio   = clip.w / clip.h
+
+    if clip_ratio > target_ratio:
+        # wider than needed — crop sides
+        new_w = int(clip.h * target_ratio)
+        clip  = crop(clip, width=new_w, x_center=clip.w / 2)
+    else:
+        # taller than needed — crop top/bottom
+        new_h = int(clip.w / target_ratio)
+        clip  = crop(clip, height=new_h, y_center=clip.h / 2)
+
+    return resize(clip, (REEL_W, REEL_H))
+
+
+def build_video(data: dict, audio_path: str,
                 day: int, followers: int,
                 output_path: str = "reel.mp4") -> str:
-    if not MOVIEPY_AVAILABLE:
-        raise RuntimeError("moviepy not installed.")
 
     audio    = AudioFileClip(audio_path)
     duration = audio.duration
+    segments = data["segments"]
+    n        = len(segments)
 
-    bg          = ColorClip(size=(REEL_W, REEL_H), color=BG_COLOR).set_duration(duration)
-    number_clip = _text_clip(str(followers), 220, list(ACCENT),  duration, ("center", 480))
-    day_clip    = _text_clip(f"DAY {day}",   72,  list(ACCENT),  duration, ("center", 280))
-    sub_clip    = _text_clip("Facts about this number", 52, list(TEXT_WHITE), duration, ("center", 740))
-    cta_clip    = _text_clip("Follow -> 1,000,000", 58, list(ACCENT), duration, ("center", REEL_H - 180))
+    # Divide audio duration equally among segments
+    seg_duration = duration / n
+    print(f"[INFO] Total duration: {duration:.1f}s, {n} segments × {seg_duration:.1f}s each")
 
-    video = CompositeVideoClip(
-        [bg, number_clip, day_clip, sub_clip, cta_clip],
+    clips = []
+    for i, seg in enumerate(segments):
+        clip_path = f"clip_{i}.mp4"
+        pexels_path = fetch_pexels_video(seg["keywords"], clip_path)
+
+        if pexels_path:
+            try:
+                raw = VideoFileClip(pexels_path)
+                # Loop if clip is shorter than segment duration
+                if raw.duration < seg_duration:
+                    loops = int(seg_duration / raw.duration) + 1
+                    from moviepy.editor import concatenate_videoclips as cv
+                    raw = cv([raw] * loops)
+                raw = raw.subclip(0, seg_duration)
+                raw = crop_to_portrait(raw).without_audio()
+            except Exception as e:
+                print(f"[WARN] Failed to process clip {i}: {e}, using color fallback")
+                raw = ColorClip(size=(REEL_W, REEL_H),
+                                color=(15, 15, 30)).set_duration(seg_duration)
+        else:
+            raw = ColorClip(size=(REEL_W, REEL_H),
+                            color=(15, 15, 30)).set_duration(seg_duration)
+
+        # Dark overlay for readability
+        overlay = ColorClip(size=(REEL_W, REEL_H),
+                            color=(0, 0, 0)).set_opacity(0.45).set_duration(seg_duration)
+
+        clips.append(CompositeVideoClip([raw, overlay], size=(REEL_W, REEL_H)))
+
+    # Concatenate all segments
+    base_video = concatenate_videoclips(clips, method="compose")
+
+    # Number + day overlay on top of everything
+    overlays = make_number_overlay(followers, day, duration)
+
+    final = CompositeVideoClip(
+        [base_video] + overlays,
         size=(REEL_W, REEL_H)
-    ).set_audio(audio)
+    ).set_audio(audio).set_duration(duration)
 
-    video.write_videofile(
+    final.write_videofile(
         output_path, fps=30, codec="libx264", audio_codec="aac",
         temp_audiofile="temp_audio.m4a", remove_temp=True, logger=None
     )
-    print(f"[INFO] Video built -> {output_path}")
+    print(f"[INFO] Final video built → {output_path}")
     return output_path
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 5. Upload & publish reel to Instagram
+# 6. Upload & post to Instagram
 # ─────────────────────────────────────────────────────────────────────────────
 def upload_video_to_hosting(video_path: str) -> str:
     with open(video_path, "rb") as f:
@@ -162,11 +275,11 @@ def upload_video_to_hosting(video_path: str) -> str:
             f"https://transfer.sh/{Path(video_path).name}",
             data=f,
             headers={"Max-Downloads": "5", "Max-Days": "1"},
-            timeout=120
+            timeout=180
         )
     resp.raise_for_status()
     url = resp.text.strip()
-    print(f"[INFO] Video uploaded -> {url}")
+    print(f"[INFO] Video uploaded → {url}")
     return url
 
 
@@ -200,9 +313,9 @@ def post_reel(video_url: str, caption: str) -> str:
         if status == "FINISHED":
             break
         if status == "ERROR":
-            raise RuntimeError(f"Instagram video processing failed: {status_resp.json()}")
+            raise RuntimeError(f"Instagram processing failed: {status_resp.json()}")
     else:
-        raise TimeoutError("Instagram video processing timed out after 5 minutes.")
+        raise TimeoutError("Instagram timed out after 5 minutes.")
 
     publish_resp = requests.post(
         f"{base}/{INSTAGRAM_USER_ID}/media_publish",
@@ -216,22 +329,17 @@ def post_reel(video_url: str, caption: str) -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 6. Orchestrate
+# 7. Orchestrate
 # ─────────────────────────────────────────────────────────────────────────────
 def main():
     print(f"\n{'='*60}")
     print(f"  Daily Reel Generator -- {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}")
     print(f"{'='*60}\n")
 
-    followers = get_follower_count()
-    script    = generate_script(DAY_NUMBER, followers)
-
-    print("\n--- SCRIPT PREVIEW ---")
-    print(script)
-    print("----------------------\n")
-
-    audio_path = generate_voiceover(script)
-    video_path = build_video(script, audio_path, DAY_NUMBER, followers)
+    followers  = get_follower_count()
+    data       = generate_script_and_keywords(DAY_NUMBER, followers)
+    audio_path = generate_voiceover(data["script"])
+    video_path = build_video(data, audio_path, DAY_NUMBER, followers)
     video_url  = upload_video_to_hosting(video_path)
 
     caption = (
