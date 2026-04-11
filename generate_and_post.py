@@ -21,15 +21,11 @@ from google import genai
 from pathlib import Path
 from datetime import datetime
 
-try:
-    from moviepy.editor import (
-        VideoFileClip, ColorClip, TextClip, CompositeVideoClip,
-        AudioFileClip, concatenate_videoclips, ImageClip
-    )
-    from moviepy.video.fx.all import crop, resize
-    MOVIEPY_AVAILABLE = True
-except ImportError:
-    MOVIEPY_AVAILABLE = False
+from moviepy.editor import (
+    VideoFileClip, ColorClip, TextClip, CompositeVideoClip,
+    AudioFileClip, concatenate_videoclips, ImageClip
+)
+from moviepy.video.fx.all import crop, resize
 
 # ── Config from environment ───────────────────────────────────────────────────
 INSTAGRAM_ACCESS_TOKEN = os.environ["INSTAGRAM_ACCESS_TOKEN"]
