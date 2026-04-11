@@ -175,11 +175,11 @@ def make_text_image(text, fontsize, color, stroke_color="black", stroke_width=3)
 
 
 def make_number_overlay(number: int, day: int, duration: float):
-    number_arr = make_text_image(str(number), 200, "white")
-    day_arr    = make_text_image("DAY " + str(day), 60, "#FFC800")
-    number_clip = ImageClip(number_arr).set_duration(duration).set_position(("center", 0.35), relative=True)
-    day_clip    = ImageClip(day_arr).set_duration(duration).set_position(("center", 0.22), relative=True)
-    return [day_clip, number_clip]
+    day_arr      = make_text_image("Day " + str(day), 60, "#FFC800")
+    followers_arr = make_text_image("Followers " + str(number), 60, "white")
+    day_clip      = ImageClip(day_arr).set_duration(duration).set_position(("center", 0.22), relative=True)
+    followers_clip = ImageClip(followers_arr).set_duration(duration).set_position(("center", 0.29), relative=True)
+    return [day_clip, followers_clip]
 
 
 def crop_to_portrait(clip):
