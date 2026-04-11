@@ -87,10 +87,19 @@ Keywords rules:
 - Examples: "space galaxy", "ancient egypt", "mathematics", "ocean waves", "city lights"
 - Make them visually interesting and likely to return good footage"""
 
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=prompt
-    )
+    # Retry up to 3 times on server errors
+    for attempt in range(3):
+        try:
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt
+            )
+            break
+        except Exception as e:
+            if attempt == 2:
+                raise
+            print(f"[WARN] Gemini attempt {attempt+1} failed: {e}, retrying in 30s...")
+            time.sleep(30)
 
     text = response.text.strip()
     # Strip markdown code fences if present
