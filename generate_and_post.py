@@ -11,11 +11,11 @@ import os
 import time
 import textwrap
 import requests
-import google.generativeai as genai
+from google import genai
 from pathlib import Path
 from datetime import datetime
 
-# Optional heavy deps (only needed for video assembly)
+# Optional heavy deps
 try:
     from moviepy.editor import (
         ColorClip, TextClip, CompositeVideoClip, AudioFileClip
@@ -30,19 +30,17 @@ INSTAGRAM_USER_ID      = os.environ["INSTAGRAM_USER_ID"]
 ELEVENLABS_API_KEY     = os.environ["ELEVENLABS_API_KEY"]
 GEMINI_API_KEY         = os.environ["GEMINI_API_KEY"]
 
-# ElevenLabs voice (Rachel – natural, free-tier friendly)
 ELEVENLABS_VOICE_ID = os.environ.get("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")
-
-# Day counter persisted via git commit
 DAY_NUMBER = int(os.environ.get("DAY_NUMBER", 1))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 1. Get follower count
+# 1. Get follower count (via Facebook Graph API)
 # ─────────────────────────────────────────────────────────────────────────────
 def get_follower_count() -> int:
+    # Use Facebook Graph API (not graph.instagram.com)
     url = (
-        f"https://graph.instagram.com/v19.0/{INSTAGRAM_USER_ID}"
+        f"https://graph.facebook.com/v19.0/{INSTAGRAM_USER_ID}"
         f"?fields=followers_count&access_token={INSTAGRAM_ACCESS_TOKEN}"
     )
     resp = requests.get(url, timeout=15)
@@ -56,8 +54,7 @@ def get_follower_count() -> int:
 # 2. Generate script with Google Gemini (FREE)
 # ─────────────────────────────────────────────────────────────────────────────
 def generate_script(day: int, followers: int) -> str:
-    genai.configure(api_key=GEMINI_API_KEY)
-    model = genai.GenerativeModel("gemini-1.5-flash")  # free tier model
+    client = genai.Client(api_key=GEMINI_API_KEY)
 
     prompt = f"""You are a scriptwriter for a viral educational Instagram Reels page.
 
@@ -75,7 +72,10 @@ Rules:
 - Tone: enthusiastic, clear, like a knowledgeable friend — NOT a stiff documentary.
 - Output ONLY the voiceover script. No stage directions, no titles, no extra commentary."""
 
-    response = model.generate_content(prompt)
+    response = client.models.generate_content(
+        model="gemini-2.0-flash",
+        contents=prompt
+    )
     script = response.text.strip()
     print(f"[INFO] Script generated ({len(script.split())} words)")
     return script
@@ -171,7 +171,7 @@ def upload_video_to_hosting(video_path: str) -> str:
 
 
 def post_reel(video_url: str, caption: str) -> str:
-    base = "https://graph.instagram.com/v19.0"
+    base = "https://graph.facebook.com/v19.0"
 
     container_resp = requests.post(
         f"{base}/{INSTAGRAM_USER_ID}/media",
