@@ -6,6 +6,9 @@ on:
     - cron: "0 9 * * *"
   workflow_dispatch:   # allows manual trigger from GitHub UI
 
+permissions:
+  contents: write
+
 jobs:
   post-reel:
     runs-on: ubuntu-latest
@@ -60,6 +63,8 @@ jobs:
           INSTAGRAM_USER_ID:      ${{ secrets.INSTAGRAM_USER_ID }}
           GEMINI_API_KEY:         ${{ secrets.GEMINI_API_KEY }}
           PEXELS_API_KEY:         ${{ secrets.PEXELS_API_KEY }}
+          GITHUB_TOKEN:           ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY:      ${{ github.repository }}
           DAY_NUMBER:             ${{ env.DAY_NUMBER }}
         run: python generate_and_post.py
 
