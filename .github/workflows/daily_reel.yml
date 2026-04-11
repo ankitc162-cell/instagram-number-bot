@@ -59,12 +59,10 @@ jobs:
       # ── 5. Run the bot ───────────────────────────────────────────────────────
       - name: Generate and post reel
         env:
-          INSTAGRAM_ACCESS_TOKEN: ${{ secrets.INSTAGRAM_ACCESS_TOKEN }}
-          INSTAGRAM_USER_ID:      ${{ secrets.INSTAGRAM_USER_ID }}
+          INSTAGRAM_USERNAME:     ${{ secrets.INSTAGRAM_USERNAME }}
+          INSTAGRAM_PASSWORD:     ${{ secrets.INSTAGRAM_PASSWORD }}
           GEMINI_API_KEY:         ${{ secrets.GEMINI_API_KEY }}
           PEXELS_API_KEY:         ${{ secrets.PEXELS_API_KEY }}
-          GH_TOKEN:              ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_REPOSITORY:      ${{ github.repository }}
           DAY_NUMBER:             ${{ env.DAY_NUMBER }}
         run: python generate_and_post.py
 
