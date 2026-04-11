@@ -308,16 +308,39 @@ def build_video(data: dict, audio_path: str,
 # 6. Upload & post to Instagram
 # ─────────────────────────────────────────────────────────────────────────────
 def upload_video_to_hosting(video_path: str) -> str:
+    """Upload video as a GitHub Release asset (free, no extra account needed)."""
+    gh_token   = os.environ["GITHUB_TOKEN"]
+    gh_repo    = os.environ["GITHUB_REPOSITORY"]  # e.g. username/instagram-number-bot
+    tag        = f"reel-day-{os.environ.get('DAY_NUMBER', '1')}-{int(time.time())}"
+    headers    = {
+        "Authorization": f"Bearer {gh_token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28"
+    }
+
+    # Step 1 — create a release
+    release_resp = requests.post(
+        f"https://api.github.com/repos/{gh_repo}/releases",
+        headers=headers,
+        json={"tag_name": tag, "name": tag, "body": "Daily reel video", "draft": False, "prerelease": True},
+        timeout=30
+    )
+    release_resp.raise_for_status()
+    upload_url = release_resp.json()["upload_url"].replace("{?name,label}", "")
+    release_id = release_resp.json()["id"]
+
+    # Step 2 — upload video as asset
+    filename = Path(video_path).name
     with open(video_path, "rb") as f:
-        resp = requests.post(
-            f"https://transfer.sh/{Path(video_path).name}",
+        asset_resp = requests.post(
+            f"{upload_url}?name={filename}",
+            headers={**headers, "Content-Type": "video/mp4"},
             data=f,
-            headers={"Max-Downloads": "5", "Max-Days": "1"},
-            timeout=180
+            timeout=300
         )
-    resp.raise_for_status()
-    url = resp.text.strip()
-    print(f"[INFO] Video uploaded → {url}")
+    asset_resp.raise_for_status()
+    url = asset_resp.json()["browser_download_url"]
+    print(f"[INFO] Video uploaded to GitHub Releases -> {url}")
     return url
 
 
