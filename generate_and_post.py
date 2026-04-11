@@ -73,7 +73,7 @@ Rules:
 - Output ONLY the voiceover script. No stage directions, no titles, no extra commentary."""
 
     response = client.models.generate_content(
-        model="gemini-2.0-flash",
+        model="gemini-2.5-flash",
         contents=prompt
     )
     script = response.text.strip()
