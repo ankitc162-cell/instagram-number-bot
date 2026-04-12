@@ -27,7 +27,7 @@ from moviepy.video.fx.all import crop, resize
 
 GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
 PEXELS_API_KEY = os.environ["PEXELS_API_KEY"]
-EDGE_TTS_VOICE = "en-US-ChristopherNeural"
+EDGE_TTS_VOICE = "hi-IN-MadhurNeural"
 DAY_NUMBER     = int(os.environ.get("DAY_NUMBER", 1))
 REEL_W, REEL_H = 1080, 1920
 
@@ -73,17 +73,23 @@ def get_follower_count() -> int:
 def generate_script_and_keywords(day: int, followers: int) -> dict:
     client = genai.Client(api_key=GEMINI_API_KEY)
     prompt = (
-        f"You are a scriptwriter for a viral educational Instagram Reels page.\n"
-        f"Today is Day {day}. The page has {followers} followers.\n\n"
-        f"Write a voiceover script about the number {followers} AND provide Pexels video search keywords for each fact.\n\n"
-        f"Return ONLY valid JSON in this exact format:\n"
-        '{{"script": "Full voiceover script here...", "segments": [{{"fact": "One sentence summary of fact 1", "keywords": "pexels search term"}}, {{"fact": "One sentence summary of fact 2", "keywords": "pexels search term"}}, {{"fact": "One sentence summary of fact 3", "keywords": "pexels search term"}}]}}\n\n'
+        f"Aap ek viral educational Instagram Reels page ke liye scriptwriter hain.\n"
+        f"Aaj Day {day} hai. Page par {followers} followers hain.\n\n"
+        f"Number {followers} ke baare mein ek Hindi voiceover script likho AUR har fact ke liye Pexels video search keywords do.\n\n"
+        f"Sirf valid JSON return karo is exact format mein:\n"
+        '{{"script": "Poora voiceover script yahan...", "segments": [{{"fact": "Fact 1 ka ek sentence summary", "keywords": "pexels search term in English"}}, {{"fact": "Fact 2 ka ek sentence summary", "keywords": "pexels search term in English"}}, {{"fact": "Fact 3 ka ek sentence summary", "keywords": "pexels search term in English"}}]}}\n\n'
         f"Script rules:\n"
-        f"- Start with: Day {day} of posting facts about the number {followers}. Today we have {followers} followers.\n"
-        f"- Include 3 fascinating facts about the number {followers}\n"
-        f"- End with: Follow us and be part of this journey, all the way to 1 million!\n"
-        f"- 150-200 words total, punchy and enthusiastic\n\n"
-        f"Keywords: simple 1-3 word Pexels search terms related to each fact topic."
+        f"- BILKUL EXACTLY is tarah shuru karo: Day {day} of posting facts about the number of my followers. Aaj mere {followers} followers hain.\n"
+        f"- Phir excitement ke saath kaho jaise abhi kuch amazing discover kiya ho — is number ke baare mein yeh jaankar aap hairan ho jaoge!\n"
+        f"- EXACTLY 3 fascinating facts likho number {followers} ke baare mein. Na zyada, na kam.\n"
+        f"- Har fact 1-2 punchy conversational sentences mein ho. Seedha viewer se baat karo. Phrases use karo jaise: yeh sun ke aap hairan ho jaoge, yeh baat mera dimaag ghuma gayi, kya aap jaante hain, sochiye zaraa.\n"
+        f"- Facts ke beech genuine wonder react karo — viewer ko feel ho ki aap dono saath mein discover kar rahe ho.\n"
+        f"- Jahan relevant ho, India, cricket, Bollywood ya rozaana ki zindagi ka reference do.\n"
+        f"- BILKUL EXACTLY is tarah khatam karo: Aapka follow kal ka number badal deta hai. Abhi follow karo aur chalo saath mein 1 million tak pahunche.\n"
+        f"- 150-180 words total. Conversational, warm, genuine Hindi — textbook jaisi nahi.\n\n"
+        f"Keywords rules:\n"
+        f"- EXACTLY 3 segments do, ek har fact ke liye\n"
+        f"- Keywords ENGLISH mein ho — simple 1-3 word Pexels search terms jo us fact se visually related ho"
     )
     for attempt in range(3):
         try:
