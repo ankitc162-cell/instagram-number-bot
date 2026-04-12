@@ -27,7 +27,7 @@ from moviepy.video.fx.all import crop, resize
 
 GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
 PEXELS_API_KEY = os.environ["PEXELS_API_KEY"]
-EDGE_TTS_VOICE = "en-US-DavisNeural"
+EDGE_TTS_VOICE = "en-US-ChristopherNeural"
 DAY_NUMBER     = int(os.environ.get("DAY_NUMBER", 1))
 REEL_W, REEL_H = 1080, 1920
 
