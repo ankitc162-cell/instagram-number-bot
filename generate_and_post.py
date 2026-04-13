@@ -323,6 +323,9 @@ def post_reel_buffer(video_path: str, caption: str):
             "mode": "addToQueue",
             "assets": {
                 "videos": [{"url": video_url}]
+            },
+            "instagram": {
+                "type": "reel"
             }
         }
     }
