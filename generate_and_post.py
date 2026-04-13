@@ -103,18 +103,19 @@ def generate_script_and_keywords(day: int, followers: int) -> dict:
         f"- EXACTLY 3 segments do, ek har fact ke liye\n"
         f"- Keywords ENGLISH mein ho — simple 1-3 word Pexels search terms jo us fact se visually related ho"
     )
+    models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-flash"]
     for attempt in range(5):
         try:
             response = client.models.generate_content(
-                model="gemini-2.5-flash",
+                model=models[attempt],
                 contents=prompt
             )
             break
         except Exception as e:
             if attempt == 4:
                 raise
-            wait = 60 * (attempt + 1)
-            print(f"[WARN] Gemini attempt {attempt+1} failed: {e}, retrying in {wait}s...")
+            wait = 30 * (attempt + 1)
+            print(f"[WARN] Gemini attempt {attempt+1} failed with {models[attempt]}: retrying in {wait}s...")
             time.sleep(wait)
     text = response.text.strip()
     if text.startswith("```"):
