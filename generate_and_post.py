@@ -85,19 +85,21 @@ def get_follower_count() -> int:
 # ─────────────────────────────────────────────────────────────────────────────
 def _build_prompt(day, followers):
     return (
-        "Aap ek viral educational Instagram Reels page ke liye scriptwriter hain.\n"
+        "Aap ek educational Instagram Reels page ke liye scriptwriter hain.\n"
         f"Aaj Day {day} hai. Page par {followers} followers hain.\n\n"
         f"Number {followers} ke baare mein ek Hindi voiceover script likho AUR har fact ke liye Pexels video search keywords do.\n\n"
         "Sirf valid JSON return karo is exact format mein:\n"
         '{{"script": "Poora voiceover script yahan...", "segments": [{{"fact": "Fact 1 ka ek sentence summary", "keywords": "pexels search term in English"}}, {{"fact": "Fact 2 ka ek sentence summary", "keywords": "pexels search term in English"}}, {{"fact": "Fact 3 ka ek sentence summary", "keywords": "pexels search term in English"}}]}}\n\n'
         "Script rules:\n"
         f"- BILKUL EXACTLY is tarah shuru karo: Day {day} of posting facts about the number of my followers. Aaj mere {followers} followers hain.\n"
-        "- Phir excitement ke saath kaho jaise abhi kuch amazing discover kiya ho.\n"
-        f"- EXACTLY 3 fascinating facts likho number {followers} ke baare mein. Na zyada, na kam.\n"
-        "- Har fact 1-2 punchy conversational sentences. Phrases: yeh sun ke aap hairan ho jaoge, yeh baat mera dimaag ghuma gayi, kya aap jaante hain.\n"
-        "- Jahan relevant ho, India, cricket, Bollywood ka reference do.\n"
-        "- BILKUL EXACTLY is tarah khatam karo: Aisi aur interesting facts ke liye follow karo, aapka follow kal ka number badal deta hai. Abhi follow karo aur chalo saath mein 1 million tak pahunche.\n"
-        "- 150-180 words total. Conversational, warm, genuine Hindi.\n\n"
+        f"- Phir naturally kaho: aur aaj hum baat karenge number {followers} ke baare mein, jo sach mein bahut interesting hai.\n"
+        f"- EXACTLY 3 informational facts likho number {followers} ke baare mein. Sirf 3, na zyada na kam.\n"
+        "- Har fact clearly aur naturally explain karo — jaise ek knowledgeable dost baat kar raha ho.\n"
+        "- Natural transitions use karo jaise: iske alawa, ek aur interesting baat, aur sabse khas baat yeh hai.\n"
+        "- Phrases jaise 'yeh baat jaan ke aapko hairaani hogi' ya 'kya aap jaante hain' use karo — lekin natural taur pe, forced nahi.\n"
+        "- Jahan fit ho, India, cricket, science, history ka reference do.\n"
+        "- BILKUL EXACTLY is tarah khatam karo: Aisi aur rochak jaankari ke liye follow karo. Aapka ek follow kal ka number badal deta hai. Chalo saath mein 1 million tak pahunche.\n"
+        "- 150-180 words total. Shuddh, natural, informational Hindi — na overdramatic na robotic.\n\n"
         "Keywords rules:\n"
         "- EXACTLY 3 segments, ek har fact ke liye\n"
         "- Keywords ENGLISH mein, simple 1-3 word Pexels search terms"
@@ -155,13 +157,12 @@ def _generate_with_gemini(day, followers):
 
 
 def generate_script_and_keywords(day: int, followers: int) -> dict:
-    if GROQ_API_KEY:
-        try:
-            print("[INFO] Using Groq for script generation...")
-            return _generate_with_groq(day, followers)
-        except Exception as e:
-            print(f"[WARN] Groq failed: {e}, falling back to Gemini...")
-    return _generate_with_gemini(day, followers)
+    try:
+        print("[INFO] Using Gemini for script generation...")
+        return _generate_with_gemini(day, followers)
+    except Exception as e:
+        print(f"[WARN] Gemini failed: {e}, falling back to Groq...")
+        return _generate_with_groq(day, followers)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -193,15 +194,75 @@ def fetch_pexels_video(query: str, output_path: str):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 4. Generate voiceover with Edge TTS
+# 4. Generate voiceover with Gemini TTS (Enceladus voice)
 # ─────────────────────────────────────────────────────────────────────────────
-async def _edge_tts_generate(script: str, output_path: str):
+def generate_voiceover(script: str, output_path: str = "voiceover.mp3") -> str:
+    try:
+        return _gemini_tts(script, output_path)
+    except Exception as e:
+        print(f"[WARN] Gemini TTS failed: {e}, falling back to Edge TTS...")
+        return _edge_tts_fallback(script, output_path)
+
+
+def _gemini_tts(script: str, output_path: str) -> str:
+    import struct
+    client = genai.Client(api_key=GEMINI_API_KEY)
+    response = client.models.generate_content(
+        model="gemini-2.5-flash-preview-tts",
+        contents=script,
+        config={
+            "response_modalities": ["AUDIO"],
+            "speech_config": {
+                "voice_config": {
+                    "prebuilt_voice_config": {
+                        "voice_name": "Enceladus"
+                    }
+                }
+            }
+        }
+    )
+    # Extract audio data from response
+    audio_data = b""
+    for part in response.candidates[0].content.parts:
+        if hasattr(part, "inline_data") and part.inline_data:
+            audio_data += part.inline_data.data
+
+    # Convert raw PCM to WAV then to MP3 using ffmpeg
+    import subprocess
+    raw_path = output_path.replace(".mp3", ".raw")
+    wav_path = output_path.replace(".mp3", ".wav")
+
+    with open(raw_path, "wb") as f:
+        f.write(audio_data)
+
+    # Convert raw PCM (24kHz, 16-bit, mono) to WAV
+    subprocess.run([
+        "ffmpeg", "-y",
+        "-f", "s16le", "-ar", "24000", "-ac", "1",
+        "-i", raw_path,
+        wav_path
+    ], check=True, capture_output=True)
+
+    # Convert WAV to MP3
+    subprocess.run([
+        "ffmpeg", "-y", "-i", wav_path, output_path
+    ], check=True, capture_output=True)
+
+    import os as _os
+    _os.remove(raw_path)
+    _os.remove(wav_path)
+
+    print(f"[INFO] Gemini TTS voiceover saved -> {output_path}")
+    return output_path
+
+
+async def _edge_tts_async(script: str, output_path: str):
     communicate = edge_tts.Communicate(script, EDGE_TTS_VOICE)
     await communicate.save(output_path)
 
-def generate_voiceover(script: str, output_path: str = "voiceover.mp3") -> str:
-    asyncio.run(_edge_tts_generate(script, output_path))
-    print(f"[INFO] Voiceover saved -> {output_path}")
+def _edge_tts_fallback(script: str, output_path: str) -> str:
+    asyncio.run(_edge_tts_async(script, output_path))
+    print(f"[INFO] Edge TTS voiceover saved -> {output_path}")
     return output_path
 
 
@@ -325,7 +386,11 @@ def upload_to_github_releases(video_path: str) -> str:
             timeout=300
         )
     asset.raise_for_status()
-    url = asset.json()["browser_download_url"]
+    # Use direct asset download URL (no redirects) for Buffer compatibility
+    asset_data = asset.json()
+    url = asset_data["browser_download_url"]
+    # Convert to direct CDN URL that Buffer can access without redirect
+    direct_url = f"https://objects.githubusercontent.com/github-production-release-asset-2e65be/{asset_data['id']}?X-Amz-Algorithm=AWS4-HMAC-SHA256"
     print(f"[INFO] Video uploaded to GitHub Releases -> {url}")
     return url
 
