@@ -35,36 +35,54 @@ REEL_W, REEL_H = 1080, 1920
 # ─────────────────────────────────────────────────────────────────────────────
 # 1. Get follower count via instagrapi
 # ─────────────────────────────────────────────────────────────────────────────
-def get_ig_client():
-    from instagrapi import Client
-    ig_username  = os.environ["INSTAGRAM_USERNAME"]
-    ig_password  = os.environ["INSTAGRAM_PASSWORD"]
-    session_file = "ig_session.json"
-    cl = Client()
-    cl.delay_range = [1, 3]
-    if os.path.exists(session_file):
-        try:
-            cl.load_settings(session_file)
-            cl.login(ig_username, ig_password)
-            cl.get_timeline_feed()
-            print("[INFO] Logged in using saved session")
-            return cl
-        except Exception:
-            print("[INFO] Session expired, logging in fresh...")
-    cl = Client()
-    cl.delay_range = [1, 3]
-    cl.login(ig_username, ig_password)
-    cl.dump_settings(session_file)
-    print("[INFO] Logged in fresh")
-    return cl
+BUFFER_API_KEY    = os.environ["BUFFER_API_KEY"]
+BUFFER_CHANNEL_ID = os.environ["BUFFER_CHANNEL_ID"]
+BUFFER_API_URL    = "https://api.buffer.com"
+
+def buffer_graphql(query: str, variables: dict = None) -> dict:
+    payload = {"query": query}
+    if variables:
+        payload["variables"] = variables
+    resp = requests.post(
+        BUFFER_API_URL,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {BUFFER_API_KEY}"
+        },
+        json=payload,
+        timeout=30
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    if "errors" in data:
+        raise RuntimeError(f"Buffer API error: {data['errors']}")
+    return data
 
 
 def get_follower_count() -> int:
-    cl    = get_ig_client()
-    user  = cl.user_info_by_username(os.environ["INSTAGRAM_USERNAME"])
-    count = user.follower_count
-    print(f"[INFO] Follower count: {count}")
-    return count
+    # Use Instagram Graph API to get follower count via Buffer channel info
+    query = """
+    query {
+      channels(input: { organizationId: "69dc9107215143c91dffdaae" }) {
+        id name service
+        statistics {
+          followers
+        }
+      }
+    }
+    """
+    try:
+        data   = buffer_graphql(query)
+        channels = data["data"]["channels"]
+        for ch in channels:
+            if ch["id"] == BUFFER_CHANNEL_ID:
+                count = ch.get("statistics", {}).get("followers", 0) or 0
+                print(f"[INFO] Follower count: {count}")
+                return count
+    except Exception as e:
+        print(f"[WARN] Could not get follower count from Buffer: {e}")
+    print("[INFO] Follower count: 0")
+    return 0
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -247,12 +265,74 @@ def build_video(data: dict, audio_path: str, day: int, followers: int, output_pa
 # ─────────────────────────────────────────────────────────────────────────────
 # 6. Post reel using instagrapi
 # ─────────────────────────────────────────────────────────────────────────────
-def post_reel_instagrapi(video_path: str, caption: str):
-    cl    = get_ig_client()
-    print("[INFO] Uploading reel...")
-    media = cl.clip_upload(path=video_path, caption=caption)
-    print(f"[INFO] Reel posted! https://www.instagram.com/reel/{media.code}/")
-    return media
+def upload_to_github_releases(video_path: str) -> str:
+    """Upload video to GitHub Releases for temporary public URL."""
+    gh_token  = os.environ["GH_TOKEN"]
+    gh_repo   = os.environ["GITHUB_REPOSITORY"]
+    tag       = f"reel-day-{DAY_NUMBER}-{int(time.time())}"
+    headers   = {
+        "Authorization": f"Bearer {gh_token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28"
+    }
+    # Create release
+    rel = requests.post(
+        f"https://api.github.com/repos/{gh_repo}/releases",
+        headers=headers,
+        json={"tag_name": tag, "name": tag, "draft": False, "prerelease": True},
+        timeout=30
+    )
+    rel.raise_for_status()
+    upload_url = rel.json()["upload_url"].replace("{?name,label}", "")
+    filename   = Path(video_path).name
+    # Upload asset
+    with open(video_path, "rb") as f:
+        asset = requests.post(
+            f"{upload_url}?name={filename}",
+            headers={**headers, "Content-Type": "video/mp4"},
+            data=f,
+            timeout=300
+        )
+    asset.raise_for_status()
+    url = asset.json()["browser_download_url"]
+    print(f"[INFO] Video uploaded to GitHub Releases -> {url}")
+    return url
+
+
+def post_reel_buffer(video_path: str, caption: str):
+    """Post reel via Buffer GraphQL API — zero ban risk, official Meta partner."""
+    video_url = upload_to_github_releases(video_path)
+
+    mutation = """
+    mutation CreatePost($input: CreatePostInput!) {
+      createPost(input: $input) {
+        ... on PostActionSuccess {
+          post { id dueAt }
+        }
+        ... on MutationError {
+          message
+        }
+      }
+    }
+    """
+    variables = {
+        "input": {
+            "text": caption,
+            "channelId": BUFFER_CHANNEL_ID,
+            "schedulingType": "automatic",
+            "mode": "addToQueue",
+            "assets": {
+                "videos": [{"url": video_url}]
+            }
+        }
+    }
+    data   = buffer_graphql(mutation, variables)
+    result = data["data"]["createPost"]
+    if "post" in result:
+        print(f"[INFO] Reel scheduled via Buffer! Post ID: {result['post']['id']}")
+    else:
+        raise RuntimeError(f"Buffer post failed: {result.get('message')}")
+    return result
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -279,7 +359,7 @@ def main():
         + "#instagramreels #viral #mindblown #science"
     )
 
-    post_reel_instagrapi(video_path, caption)
+    post_reel_buffer(video_path, caption)
     print("\nDone! Reel posted successfully.")
 
 
