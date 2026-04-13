@@ -6,4 +6,3 @@ edge-tts>=6.1.9
 imageio==2.33.1
 imageio-ffmpeg>=0.4.9
 numpy>=1.24.0
-instagrapi>=2.0.0
