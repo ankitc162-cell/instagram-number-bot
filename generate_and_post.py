@@ -52,7 +52,8 @@ def buffer_graphql(query: str, variables: dict = None) -> dict:
         json=payload,
         timeout=30
     )
-    resp.raise_for_status()
+    if not resp.ok:
+        raise RuntimeError(f"Buffer API {resp.status_code}: {resp.text}")
     data = resp.json()
     if "errors" in data:
         raise RuntimeError(f"Buffer API error: {data['errors']}")
@@ -321,11 +322,14 @@ def post_reel_buffer(video_path: str, caption: str):
             "channelId": BUFFER_CHANNEL_ID,
             "schedulingType": "automatic",
             "mode": "addToQueue",
+            "metadata": {
+                "instagram": {
+                    "type": "reel",
+                    "shouldShareToFeed": True
+                }
+            },
             "assets": {
                 "videos": [{"url": video_url}]
-            },
-            "instagram": {
-                "type": "reel"
             }
         }
     }
