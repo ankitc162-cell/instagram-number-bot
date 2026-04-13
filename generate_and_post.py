@@ -61,28 +61,21 @@ def buffer_graphql(query: str, variables: dict = None) -> dict:
 
 
 def get_follower_count() -> int:
-    # Use Instagram Graph API to get follower count via Buffer channel info
-    query = """
-    query {
-      channels(input: { organizationId: "69dc9107215143c91dffdaae" }) {
-        id name service
-        statistics {
-          followers
-        }
-      }
-    }
-    """
-    try:
-        data   = buffer_graphql(query)
-        channels = data["data"]["channels"]
-        for ch in channels:
-            if ch["id"] == BUFFER_CHANNEL_ID:
-                count = ch.get("statistics", {}).get("followers", 0) or 0
+    # Fetch follower count via Instagram Graph API
+    # Falls back to 0 if not configured
+    ig_user_id = os.environ.get("INSTAGRAM_USER_ID", "")
+    ig_token   = os.environ.get("INSTAGRAM_ACCESS_TOKEN", "")
+    if ig_user_id and ig_token:
+        try:
+            url  = f"https://graph.facebook.com/v19.0/{ig_user_id}?fields=followers_count&access_token={ig_token}"
+            resp = requests.get(url, timeout=15)
+            if resp.ok:
+                count = resp.json().get("followers_count", 0) or 0
                 print(f"[INFO] Follower count: {count}")
                 return count
-    except Exception as e:
-        print(f"[WARN] Could not get follower count from Buffer: {e}")
-    print("[INFO] Follower count: 0")
+        except Exception as e:
+            print(f"[WARN] Could not get follower count: {e}")
+    print("[INFO] Follower count: 0 (no Instagram credentials configured)")
     return 0
 
 
@@ -110,7 +103,7 @@ def generate_script_and_keywords(day: int, followers: int) -> dict:
         f"- EXACTLY 3 segments do, ek har fact ke liye\n"
         f"- Keywords ENGLISH mein ho — simple 1-3 word Pexels search terms jo us fact se visually related ho"
     )
-    for attempt in range(3):
+    for attempt in range(5):
         try:
             response = client.models.generate_content(
                 model="gemini-2.5-flash",
@@ -118,10 +111,11 @@ def generate_script_and_keywords(day: int, followers: int) -> dict:
             )
             break
         except Exception as e:
-            if attempt == 2:
+            if attempt == 4:
                 raise
-            print(f"[WARN] Gemini attempt {attempt+1} failed: {e}, retrying in 30s...")
-            time.sleep(30)
+            wait = 60 * (attempt + 1)
+            print(f"[WARN] Gemini attempt {attempt+1} failed: {e}, retrying in {wait}s...")
+            time.sleep(wait)
     text = response.text.strip()
     if text.startswith("```"):
         text = text.split("```")[1]
