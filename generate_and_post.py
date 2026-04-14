@@ -99,7 +99,7 @@ def _build_prompt(day, followers):
         "- Natural transitions use karo jaise: iske alawa, ek aur interesting baat, aur sabse khas baat yeh hai.\n"
         "- Phrases jaise 'yeh baat jaan ke aapko hairaani hogi' ya 'kya aap jaante hain' use karo — lekin natural taur pe, forced nahi.\n"
         "- Jahan fit ho, India, cricket, science, history ka reference do.\n"
-        "- BILKUL EXACTLY is tarah khatam karo: Aisi aur rochak jaankari ke liye follow karo. Aapka ek follow kal ka number badal deta hai. Chalo saath mein 1 million tak pahunche.\n"
+        "- BILKUL EXACTLY is tarah khatam karo: Aisi aur rochak jaankari ke liye follow karo. Aapka ek follow kal ka number badal dega. Chalo mere saath 1 million tak pahunche.\n"
         "- 150-180 words total. Shuddh, natural, informational Hindi — na overdramatic na robotic.\n\n"
         "Keywords rules:\n"
         "- EXACTLY 3 segments, ek har fact ke liye\n"
