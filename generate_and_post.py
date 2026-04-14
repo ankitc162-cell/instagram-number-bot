@@ -26,7 +26,8 @@ from moviepy.editor import (
 from moviepy.video.fx.all import crop, resize
 
 GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
-GROQ_API_KEY   = os.environ.get("GROQ_API_KEY", "")
+GROQ_API_KEY    = os.environ.get("GROQ_API_KEY", "")
+OPENAI_API_KEY  = os.environ.get("OPENAI_API_KEY", "")
 PEXELS_API_KEY = os.environ["PEXELS_API_KEY"]
 EDGE_TTS_VOICE = "hi-IN-MadhurNeural"
 DAY_NUMBER     = int(os.environ.get("DAY_NUMBER", 1))
@@ -143,10 +144,9 @@ def _generate_with_groq(day, followers):
 def _generate_with_gemini(day, followers):
     client = genai.Client(api_key=GEMINI_API_KEY)
     prompt = _build_prompt(day, followers)
-    models = ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-2.0-flash"]
     for attempt in range(3):
         try:
-            response = client.models.generate_content(model=models[attempt], contents=prompt)
+            response = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
             return _parse_response(response.text)
         except Exception as e:
             if attempt == 2:
@@ -156,13 +156,37 @@ def _generate_with_gemini(day, followers):
             time.sleep(wait)
 
 
+def _generate_with_chatgpt(day, followers):
+    prompt = _build_prompt(day, followers)
+    resp = requests.post(
+        "https://api.openai.com/v1/chat/completions",
+        headers={
+            "Authorization": f"Bearer {OPENAI_API_KEY}",
+            "Content-Type": "application/json"
+        },
+        json={
+            "model": "gpt-4o",
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": 1000,
+            "temperature": 0.8
+        },
+        timeout=30
+    )
+    resp.raise_for_status()
+    text = resp.json()["choices"][0]["message"]["content"]
+    return _parse_response(text)
+
+
 def generate_script_and_keywords(day: int, followers: int) -> dict:
     try:
         print("[INFO] Using Gemini for script generation...")
         return _generate_with_gemini(day, followers)
     except Exception as e:
-        print(f"[WARN] Gemini failed: {e}, falling back to Groq...")
-        return _generate_with_groq(day, followers)
+        print(f"[WARN] Gemini failed: {e}")
+        if OPENAI_API_KEY:
+            print("[INFO] Falling back to ChatGPT...")
+            return _generate_with_chatgpt(day, followers)
+        raise
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -197,11 +221,7 @@ def fetch_pexels_video(query: str, output_path: str):
 # 4. Generate voiceover with Gemini TTS (Enceladus voice)
 # ─────────────────────────────────────────────────────────────────────────────
 def generate_voiceover(script: str, output_path: str = "voiceover.mp3") -> str:
-    try:
-        return _gemini_tts(script, output_path)
-    except Exception as e:
-        print(f"[WARN] Gemini TTS failed: {e}, falling back to Edge TTS...")
-        return _edge_tts_fallback(script, output_path)
+    return _gemini_tts(script, output_path)
 
 
 def _gemini_tts(script: str, output_path: str) -> str:
@@ -235,9 +255,13 @@ def _gemini_tts(script: str, output_path: str) -> str:
     with open(raw_path, "wb") as f:
         f.write(audio_data)
 
+    # Use imageio-ffmpeg binary (guaranteed to exist)
+    import imageio_ffmpeg
+    ffmpeg_bin = imageio_ffmpeg.get_ffmpeg_exe()
+
     # Convert raw PCM (24kHz, 16-bit, mono) to WAV
     subprocess.run([
-        "ffmpeg", "-y",
+        ffmpeg_bin, "-y",
         "-f", "s16le", "-ar", "24000", "-ac", "1",
         "-i", raw_path,
         wav_path
@@ -245,7 +269,7 @@ def _gemini_tts(script: str, output_path: str) -> str:
 
     # Convert WAV to MP3
     subprocess.run([
-        "ffmpeg", "-y", "-i", wav_path, output_path
+        ffmpeg_bin, "-y", "-i", wav_path, output_path
     ], check=True, capture_output=True)
 
     import os as _os
